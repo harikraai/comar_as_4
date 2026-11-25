@@ -113,6 +113,7 @@ architecture arch_DataPath of DataPath is
             muxIn3     :in std_logic_vector(busWidth-1 downto 0);       --PC
             muxIn4     :in std_logic_vector(busWidth-1 downto 0);       --mult
             muxIn5     :in std_logic_vector(busWidth-1 downto 0);       --PC+4
+            muxIn6     :in std_logic_vector(busWidth-1 downto 0);
             selector   :in std_logic_vector(2 downto 0);       --ToRegister
             muxOut     :out std_logic_vector(busWidth-1 downto 0)
         );
@@ -131,7 +132,6 @@ architecture arch_DataPath of DataPath is
             StoreSel    : out std_logic;
             ALUSrc      : out std_logic;
             WriteReg    : out std_logic;
-            Op_sel      : out std_logic;
             MulOp       : out std_logic
         );
     end component;
@@ -153,8 +153,7 @@ architecture arch_DataPath of DataPath is
     signal regData1,regData2    : std_logic_vector(31 downto 0);    --data readed from register file
     signal signo, zero, carry   : std_logic;
     signal overflow             : std_logic;                        --signed overflow of the ALU subtraction (for BLT/BGE)
-    signal result_ALU, dataIn       : std_logic_vector(31 downto 0);    --alu result and data in to memory
-    signal result               : std_logic_vector(31 downto 0);    --result from ALU/multiplier
+    signal result, dataIn       : std_logic_vector(31 downto 0);    --alu result and data in to memory
     signal product              : std_logic_vector(31 downto 0);    --product
     signal MulOp                : std_logic;                        --signal to select ALU or multiplier
     signal immediate            : std_logic_vector(31 downto 0);    --immediate generated
@@ -162,16 +161,13 @@ architecture arch_DataPath of DataPath is
     signal jump, memWrite       : std_logic;
     signal StoreSel, ALUSrc     : std_logic;
     signal writeReg, PCSrc      : std_logic;
-    signal Op_sel               : std_logic;
     signal toRegister, Branch, ALUOp : std_logic_vector(2 downto 0);
     signal dataForReg           : std_logic_vector(31 downto 0);    --data to be written in register File
     signal op2                  : std_logic_vector(31 downto 0);    --operator for ALU(output from mux)
     signal branchTarget         : std_logic_vector(31 downto 0);    --PC + (immediate << 1): branches and JAL
     signal jalrTarget           : std_logic_vector(31 downto 0);    --(rs1 + immediate) and 0xFFFFFFFE: JALR
-    signal regData2Anded        : std_logic_vector(31 downto 0);
     signal newAddress           : std_logic_vector(31 downto 0);    --target of a taken branch/jump
     signal shifted              : std_logic_vector(31 downto 0);
-    signal result_mux_4         : std_logic_vector(31 downto 0);
 begin
     
     PCount: PC port map (clk => clk, rst => rst, PCIn => PCIn, PCOut => PCOut);
@@ -187,25 +183,21 @@ begin
     ALU: ALU_RV32 port map (operator1 => regData1, operator2 => op2, ALUOp => ALUOp, 
     result_ALU => result, zero => zero, carryOut => carry, overflow => overflow, signo => signo);
 
-    Mux1: Mux port map (muxIn0 => regData2, muxIn1 => regData2Anded, selector => StoreSel, muxOut => dataIn);
-
-    RAM: Data_Mem port map (clk => clk, writeEn => memWrite, storeByte => StoreSel, Address => result(3 downto 0), dataIn => dataIn, dataOut => dataOut);
+    RAM: Data_Mem port map (clk => clk, writeEn => memWrite, storeByte => StoreSel, Address => result(3 downto 0), dataIn => regData2, dataOut => dataOut);
 
     BRControl: Branch_Control port map (branch => Branch, signo => signo, overflow => overflow, zero => zero,PCSrc => PCSrc);
 
-    MuxReg: Mux_ToRegFile port map (muxIn0 => result_mux_4, muxIn1 => dataOut, muxIn2 => dataOut, muxIn3 => PCOut,
-    muxIn4 => (others => '0'), muxIn5 => PCOutPlus, selector => toRegister, muxOut => dataForReg);
+    MuxReg: Mux_ToRegFile port map (muxIn0 => result, muxIn1 => dataOut, muxIn2 => dataOut, muxIn3 => PCOut,
+    muxIn4 => (others => '0'), muxIn5 => PCOutPlus, muxIn6 => product, selector => toRegister, muxOut => dataForReg);
 
     Ctrl: Control port map (opcode => instruction(6 downto 0), funct3 => instruction(14 downto 12), funct7 => instruction(31 downto 25),
     jump => jump, MemWrite => memWrite, Branch => Branch, ALUOp => ALUOp, StoreSel => StoreSel, ALUSrc => ALUSrc, 
-    WriteReg => WriteReg, ToRegister => toRegister, Op_sel => Op_sel, MulOp => MulOp);
+    WriteReg => WriteReg, ToRegister => toRegister, MulOp => MulOp);
 
     --jump = '1' only for JALR: target = (rs1 + imm) and 0xFFFFFFFE (not PC relative). Otherwise PC + (imm << 1).
     Mux2: Mux port map (muxIn0 => branchTarget, muxIn1 => jalrTarget, selector => jump, muxOut => newAddress);
 
     Mux3: Mux port map (muxIn0 => PCOutPlus, muxIn1 => newAddress, selector => PCSrc, muxOut => PCIn);
-
-    Mux4: Mux port map (muxIn0 => result, muxIn1 => product, selector => Op_sel, muxOut => result_mux_4);
     
     Imm: Immediate_Generator port map (instruction => instruction, immediate => immediate);
 
@@ -216,12 +208,11 @@ begin
         MulOp => MulOp
     );
 
-    regData2Anded <= regData2 and X"000000FF";
     PCOutPlus <= PCOut + 4;
     shifted <= immediate(30 downto 0) & '0';
     branchTarget <= PCOut + shifted;
     jalrTarget <= result(31 downto 1) & '0';                        --clear bit 0 of rs1 + imm
     
-    ALUMULTIPLIER_result <= result_mux_4;
+    ALUMULTIPLIER_result <= result;
 
 end architecture arch_DataPath;
