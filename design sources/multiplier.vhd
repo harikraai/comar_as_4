@@ -46,7 +46,7 @@ begin
     check <= operator1(size-1) xor operator2(size-1);
     product_neg <= not product_s + 1;
 
-
+    
     process(operator1, operator2, MulOp, product_s, check,product_neg)
     begin
 
